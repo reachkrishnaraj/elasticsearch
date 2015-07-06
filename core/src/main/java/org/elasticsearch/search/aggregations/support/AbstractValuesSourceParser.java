@@ -19,6 +19,8 @@
 
 package org.elasticsearch.search.aggregations.support;
 
+import org.elasticsearch.common.ParseField;
+import org.elasticsearch.common.ParseFieldMatcher;
 import org.elasticsearch.common.xcontent.XContentParser;
 import org.elasticsearch.script.Script;
 import org.elasticsearch.script.Script.ScriptField;
@@ -30,9 +32,8 @@ import org.elasticsearch.search.aggregations.AggregatorFactory;
 import org.elasticsearch.search.internal.SearchContext;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.Map;
-
-import static com.google.common.collect.Maps.newHashMap;
 
 /**
  *
@@ -82,7 +83,7 @@ public abstract class AbstractValuesSourceParser<VS extends ValuesSource> implem
     }
 
     @Override
-    public AggregatorFactory parse(String aggregationName, XContentParser parser, SearchContext context) throws IOException {
+    public final AggregatorFactory parse(String aggregationName, XContentParser parser, SearchContext context) throws IOException {
 
         String field = null;
         Script script = null;
@@ -91,6 +92,7 @@ public abstract class AbstractValuesSourceParser<VS extends ValuesSource> implem
         ValueType valueType = null;
         String format = null;
         Object missing = null;
+        Map<ParseField, Object> otherOptions = new HashMap<>();
 
         XContentParser.Token token;
         String currentFieldName = null;
@@ -117,7 +119,7 @@ public abstract class AbstractValuesSourceParser<VS extends ValuesSource> implem
                         throw new SearchParseException(context, "Unexpected token " + token + " in [" + aggregationName + "].",
                                 parser.getTokenLocation());
                     }
-                } else {
+                } else if (!token(aggregationName, currentFieldName, token, parser, context.parseFieldMatcher(), otherOptions)) {
                     throw new SearchParseException(context, "Unexpected token " + token + " in [" + aggregationName + "].",
                             parser.getTokenLocation());
                 }
@@ -126,11 +128,11 @@ public abstract class AbstractValuesSourceParser<VS extends ValuesSource> implem
                     script = Script.parse(parser, context.parseFieldMatcher());
                 } else if ("params".equals(currentFieldName)) {
                     params = parser.map();
-                } else {
+                } else if (!token(aggregationName, currentFieldName, token, parser, context.parseFieldMatcher(), otherOptions)) {
                     throw new SearchParseException(context, "Unexpected token " + token + " in [" + aggregationName + "].",
                             parser.getTokenLocation());
                 }
-            } else if (!token(currentFieldName, token, parser)) {
+            } else if (!token(aggregationName, currentFieldName, token, parser, context.parseFieldMatcher(), otherOptions)) {
                 throw new SearchParseException(context, "Unexpected token " + token + " in [" + aggregationName + "].",
                         parser.getTokenLocation());
             }
@@ -141,13 +143,14 @@ public abstract class AbstractValuesSourceParser<VS extends ValuesSource> implem
             ScriptParameterValue scriptValue = scriptParameterParser.getDefaultScriptParameterValue();
             if (scriptValue != null) {
                 if (params == null) {
-                    params = newHashMap();
+                    params = new HashMap<>();
                 }
                 script = new Script(scriptValue.script(), scriptValue.scriptType(), scriptParameterParser.lang(), params);
             }
         }
 
-        ValuesSourceAggregatorFactory<VS> factory = createFactory(aggregationName, this.valuesSourceType, this.targetValueType);
+        ValuesSourceAggregatorFactory<VS> factory = createFactory(aggregationName, this.valuesSourceType, this.targetValueType,
+                otherOptions);
         factory.field(field);
         factory.script(script);
         factory.valueType(valueType);
@@ -157,7 +160,8 @@ public abstract class AbstractValuesSourceParser<VS extends ValuesSource> implem
     }
 
     protected abstract ValuesSourceAggregatorFactory<VS> createFactory(String aggregationName, Class<VS> valuesSourceType,
-            ValueType targetValueType);
+            ValueType targetValueType, Map<ParseField, Object> otherOptions);
 
-    protected abstract boolean token(String currentFieldName, XContentParser.Token token, XContentParser parser) throws IOException;
+    protected abstract boolean token(String aggregationName, String currentFieldName, XContentParser.Token token, XContentParser parser,
+            ParseFieldMatcher parseFieldMatcher, Map<ParseField, Object> otherOptions) throws IOException;
 }
